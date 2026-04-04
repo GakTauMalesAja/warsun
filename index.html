@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistem Manajemen Warung - Dashboard Inventori & Transaksi</title>
+    <link rel="stylesheet" href="styles.css">
+    <script>
+        function loadScript(src, opts = {}) {
+            return new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                script.src = src;
+                script.async = true;
+                if (opts.integrity) script.integrity = opts.integrity;
+                if (opts.crossOrigin) script.crossOrigin = opts.crossOrigin;
+                script.onload = () => resolve(script);
+                script.onerror = () => reject(new Error(`Gagal load script ${src}`));
+                document.head.appendChild(script);
+            });
+        }
+
+        async function initLibraries() {
+            try {
+                await loadScript('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js', {
+                    crossOrigin: 'anonymous'
+                });
+            } catch (e1) {
+                try {
+                    await loadScript('https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js');
+                } catch (e2) {
+                    console.error('Gagal memuat SheetJS (XLSX) dari CDN utama & fallback', e1, e2);
+                    alert('Gagal memuat library Excel. Silakan gunakan koneksi internet atau file lokal.');
+                }
+            }
+
+            try {
+                await loadScript('https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js', {
+                    crossOrigin: 'anonymous'
+                });
+            } catch (e1) {
+                try {
+                    await loadScript('https://unpkg.com/chart.js@3.9.1/dist/chart.min.js');
+                } catch (e2) {
+                    console.error('Gagal memuat Chart.js', e1, e2);
+                    alert('Gagal memuat library Chart.js. Grafik tidak akan muncul.');
+                }
+            }
+
+            if (window.initializeApp) {
+                window.initializeApp();
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', initLibraries);
+    </script>
+</head>
+<body>
+    <!-- Container -->
+    <div class="container">
+        <!-- Navigation -->
+        <nav class="nav-tabs">
+            <button class="nav-btn active" data-section="dashboard">📈 Dashboard</button>
+            <button class="nav-btn" data-section="inventory">📦 Inventori</button>
+            <button class="nav-btn" data-section="transactions">💰 Transaksi</button>
+            <button class="nav-btn" data-section="upload">📁 Upload Excel</button>
+        </nav>
+
+        <!-- Sections -->
+        <!-- Dashboard Section -->
+        <section id="dashboard" class="section active">
+            <h2>Dashboard Overview</h2>
+            <div class="alert" id="dashboardAlert"></div>
+
+            <!-- Dashboard Stats -->
+            <div class="dashboard-stats">
+                <div class="stat-card">
+                    <div class="stat-label">Penjualan Hari Ini</div>
+                    <div class="stat-value" id="todayValue">Rp 0</div>
+                    <div class="stat-note">Total Nilai semua Invoice hari ini.</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Penjualan Kemarin</div>
+                    <div class="stat-value" id="yesterdayValue">Rp 0</div>
+                    <div class="stat-note">Total Nilai semua Invoice kemarin</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Total Produk</div>
+                    <div class="stat-value" id="totalProducts">0</div>
+                    <div class="stat-note">Total produk yang ada di warung.</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Produk Kurang Stok</div>
+                    <div class="stat-value" id="lowStockProducts">0</div>
+                    <div class="stat-note">produk/stok yang harus di beli kembali.</div>
+                </div>
+                <div class="stat-card" title="Hanya dihitung dari pembelian / pengisian stok baru hari ini.">
+                    <div class="stat-label">Pembelian Hari ini</div>
+                    <div class="stat-value" id="todayIncomingValue">Rp 0</div>
+                    <div class="stat-note">Nilai stok masuk yang dibeli/ditambah hari ini.</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Laba Bersih Hari Ini</div>
+                    <div class="stat-value" id="todayProfit">Rp 0</div>
+                    <div class="stat-note">Penjualan hari ini dikurangi harga beli produk terjual.</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Laba Bersih Kemarin</div>
+                    <div class="stat-value" id="yesterdayProfit">Rp 0</div>
+                    <div class="stat-note">Penjualan kemarin dikurangi harga beli produk terjual.</div>
+                </div>
+            </div>
+
+            <!-- Charts -->
+            <div class="dashboard-charts">
+                <div class="chart-container">
+                    <h3>Grafik Transaksi 7 Hari</h3>
+                    <canvas id="transactionChart" height="80"></canvas>
+                </div>
+
+                <div class="table-container">
+                    <h3>Top Customers</h3>
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>No</th>
+                                <th>Customer</th>
+                                <th>Total Transaksi</th>
+                                <th>Total Nilai</th>
+                            </tr>
+                        </thead>
+                        <tbody id="topCustomersTableBody">
+                            <tr><td colspan="4" class="text-center no-data">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Low Stock Table -->
+            <div class="table-container">
+                <h3>Produk yang Perlu Dibeli Kembali</h3>
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>No</th>
+                            <th>Nama Produk</th>
+                            <th>Kategori</th>
+                            <th>Stok</th>
+                            <th>Butuh Restock</th>
+                            <th>Harga Beli</th>
+                            <th>Total Harga Keseluruhan</th>
+                        </tr>
+                    </thead>
+                    <tbody id="lowStockTable">
+                        <tr><td colspan="7" class="text-center no-data">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Inventory Section -->
+        <section id="inventory" class="section">
+            <h2>Manajemen Inventori</h2>
+            <div class="alert" id="inventoryAlert"></div>
+
+            <!-- Inventory Controls -->
+            <div class="controls">
+                <button class="btn btn-primary" onclick="openAddItemModal()">+ Tambah Produk</button>
+                <input type="text" id="searchInput" placeholder="Cari produk...">
+                <select id="categoryFilter" onchange="applyCategoryFilter()" style="padding: 8px; border-radius: 6px; border: 1px solid #30363d;">
+                    <option value="all">Semua Kategori</option>
+                </select>
+            </div>
+
+            <!-- Inventory Table -->
+            <div class="table-container">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>No</th>
+                            <th>Nama Produk</th>
+                            <th>Kategori</th>
+                            <th>Qty</th>
+                            <th>Harga Beli</th>
+                            <th>Harga Jual</th>
+                            <th>Total Nilai</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="inventoryTable">
+                        <tr><td colspan="8" class="text-center no-data">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Transactions Section -->
+        <section id="transactions" class="section">
+            <h2>Manajemen Transaksi Penjualan (Invoice)</h2>
+            <div class="alert" id="transactionAlert"></div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                <!-- Invoice Form -->
+                <div>
+                    <h3>Form Invoice Baru</h3>
+                    <form id="invoiceForm" onsubmit="submitInvoice(event)">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>No. Faktur:</label>
+                                <input type="text" id="invoiceNumber" readonly>
+                            </div>
+
+                            <div class="form-group">
+                                <label>Tanggal & Waktu:</label>
+                                <input type="datetime-local" id="invoiceDate" required>
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Nama Customer *:</label>
+                            <input list="customerList" id="customerName" placeholder="Pilih dari daftar atau ketik customer baru (default: umum)" value="umum">
+                            <datalist id="customerList"></datalist>
+                        </div>
+
+                        <div style="border: 1px solid #30363d; padding: 15px; border-radius: 5px; background: #161b22;">
+                            <h4>Tambah Item</h4>
+                            <div class="form-group">
+                                <label>Cari dan Pilih Produk *:</label>
+                                <input type="text" id="invoiceProductSearch" placeholder="Ketik nama produk untuk mencari..." onkeyup="filterInvoiceProducts()">
+                                <select id="invoiceProduct" style="margin-top: 8px;">
+                                    <option value="">-- Pilih atau Cari Produk --</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group">
+                                <label>Qty *:</label>
+                                <input type="number" id="invoiceQty" value="1" min="1" required>
+                            </div>
+
+                            <button type="button" class="btn btn-success" onclick="addItemToInvoice()">Tambah Item</button>
+                        </div>
+
+                        <div style="margin-top: 15px;">
+                            <button type="submit" class="btn btn-primary">Simpan Invoice</button>
+                            <button type="button" class="btn btn-warning" onclick="resetInvoiceForm()">Reset</button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Invoice Items -->
+                <div>
+                    <h3>Item Invoice</h3>
+                    <div class="table-container" style="max-height: 450px; overflow-y: auto;">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Produk</th>
+                                    <th>Kategori</th>
+                                    <th>Qty</th>
+                                    <th>Harga</th>
+                                    <th>Subtotal</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="invoiceItemsTable">
+                                <tr><td colspan="6" class="text-center no-data">Belum ada item</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div style="margin-top: 10px; padding: 10px; background: #161b22; border-radius: 5px; text-align: right;">
+                        <h3>Total: <span id="invoiceTotalDisplay">Rp 0</span></h3>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Invoice History -->
+            <h3 style="margin-top: 30px;">Riwayat Invoice</h3>
+            <div class="controls">
+                <input type="text" id="invoiceSearchInput" placeholder="Cari invoice..." onkeyup="searchInvoices()">
+            </div>
+            <div class="table-container">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>No. Faktur</th>
+                            <th>Tanggal</th>
+                            <th>Customer</th>
+                            <th>Items</th>
+                            <th>Total Qty</th>
+                            <th>Total Nilai</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="invoiceHistoryTable">
+                        <tr><td colspan="7" class="text-center no-data">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Upload Section -->
+        <section id="upload" class="section">
+            <h2>Upload Data dari Excel</h2>
+            <div class="alert" id="uploadAlert"></div>
+
+            <div class="upload-content">
+                <div>
+                    <h3>Format File Excel</h3>
+                    <p>File Excel harus memiliki kolom berikut (sesuai case-sensitive):</p>
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Kolom</th>
+                                <th>Tipe</th>
+                                <th>Keterangan</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>Nomor</td>
+                                <td>Angka</td>
+                                <td>ID unik produk</td>
+                            </tr>
+                            <tr>
+                                <td>Nama Barang</td>
+                                <td>Teks</td>
+                                <td>Nama produk</td>
+                            </tr>
+                            <tr>
+                                <td>Kategori</td>
+                                <td>Teks</td>
+                                <td>Kategori produk</td>
+                            </tr>
+                            <tr>
+                                <td>Harga Beli</td>
+                                <td>Angka</td>
+                                <td>Harga pembelian</td>
+                            </tr>
+                            <tr>
+                                <td>Harga Jual</td>
+                                <td>Angka</td>
+                                <td>Harga penjualan</td>
+                            </tr>
+                            <tr>
+                                <td>Qty</td>
+                                <td>Angka</td>
+                                <td>Jumlah stok</td>
+                            </tr>
+                            <tr>
+                                <td>Total</td>
+                                <td>Angka</td>
+                                <td>Total nilai (Harga Beli × Qty)</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div>
+                    <h3>Upload File</h3>
+                    <input type="file" id="excelFile" accept=".xlsx,.xls,.csv" />
+                    <div class="upload-actions">
+                        <button class="btn btn-info" onclick="checkFileHeaders()">Check Headers</button>
+                        <button class="btn btn-primary" onclick="handleExcelUpload()">Upload & Import</button>
+                        <button class="btn btn-success" onclick="exportTemplate()">Download Template</button>
+                        <button class="btn btn-warning" onclick="exportToExcel()">Export Inventori</button>
+                        <button class="btn btn-warning" onclick="exportTransactionsToExcel()">Export Invoice</button>
+                    </div>
+                    <div id="headerCheckResult"></div>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Add Item Modal -->
+    <div id="addItemModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeAddItemModal()">&times;</span>
+            <h2>Tambah Produk Baru</h2>
+            <form id="addItemForm">
+                <div class="form-group">
+                    <label>Nama Produk *:</label>
+                    <input type="text" id="newItemName" placeholder="Nama produk" required>
+                </div>
+                <div class="form-group">
+                    <label>Kategori *:</label>
+                    <input list="categoryList" id="newItemCategory" placeholder="Pilih dari daftar atau ketik kategori baru (default: umum)" value="umum" required>
+                    <datalist id="categoryList"></datalist>
+                </div>
+                <div class="form-group">
+                    <label>Harga Beli (Rp) *:</label>
+                    <input type="number" id="newItemBuyPrice" placeholder="0" min="0" required>
+                </div>
+                <div class="form-group">
+                    <label>Harga Jual (Rp) *:</label>
+                    <input type="number" id="newItemSellPrice" placeholder="0" min="0" required>
+                </div>
+                <div class="form-group">
+                    <label>Qty *:</label>
+                    <input type="number" id="newItemQty" placeholder="0" min="0" required>
+                </div>
+                <button type="submit" class="btn btn-primary">Tambah Produk</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Edit Item Modal -->
+    <div id="editItemModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeEditItemModal()">&times;</span>
+            <h2>Edit Produk</h2>
+            <form id="editItemForm">
+                <input type="hidden" id="editItemId">
+                <div class="form-group">
+                    <label>Nama Produk *:</label>
+                    <input type="text" id="editItemName" placeholder="Nama produk" required>
+                </div>
+                <div class="form-group">
+                    <label>Kategori *:</label>
+                    <input type="text" id="editItemCategory" placeholder="Kategori" required>
+                </div>
+                <div class="form-group">
+                    <label>Harga Beli (Rp) *:</label>
+                    <input type="number" id="editItemBuyPrice" placeholder="0" min="0" required>
+                </div>
+                <div class="form-group">
+                    <label>Harga Jual (Rp) *:</label>
+                    <input type="number" id="editItemSellPrice" placeholder="0" min="0" required>
+                </div>
+                <div class="form-group">
+                    <label>Qty *:</label>
+                    <input type="number" id="editItemQty" placeholder="0" min="0" required>
+                </div>
+                <button type="submit" class="btn btn-primary">Simpan Perubahan</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Invoice Detail Modal -->
+    <div id="invoiceDetailModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <span class="close" onclick="closeInvoiceDetailModal()">&times;</span>
+            <h2>Warung Shinta</h2>
+            <h3>jl. Gondrong No.1, RT.006/RW.006, Kenanga, Cipondoh, Kota Tangerang.</h3>
+            <div style="margin-bottom: 20px;">
+                <p><strong>No. Faktur:</strong> <span id="detailInvoiceNumber"></span></p>
+                <p><strong>Tanggal:</strong> <span id="detailInvoiceDate"></span></p>
+                <p><strong>Customer:</strong> <span id="detailCustomerName"></span></p>
+                <p><strong>Total Items:</strong> <span id="detailTotalItems"></span></p>
+            </div>
+
+            <h3>Detail Item</h3>
+            <div class="table-container">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Produk</th>
+                            <th>Kategori</th>
+                            <th>Qty</th>
+                            <th>Harga Satuan</th>
+                            <th>Subtotal</th>
+                        </tr>
+                    </thead>
+                    <tbody id="detailInvoiceItemsTable">
+                    </tbody>
+                </table>
+            </div>
+
+            <div style="margin-top: 15px; padding: 15px; background: #161b22; border-radius: 5px; text-align: right;">
+                <h3>Total: <span id="detailInvoiceTotal"></span></h3>
+            </div>
+
+            <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: flex-end;">
+                <button class="btn btn-primary" onclick="printThermalReceipt()">🖨️ Cetak Faktur</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Load app.js -->
+    <script src="app.js"></script>
+</body>
+</html>
