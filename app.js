@@ -70,6 +70,11 @@ function initializeApp() {
     document.getElementById('editItemForm').addEventListener('submit', handleEditItem);
     document.getElementById('searchInput').addEventListener('input', handleSearch);
 
+    const invoiceProductSearch = document.getElementById('invoiceProductSearch');
+    if (invoiceProductSearch) {
+        invoiceProductSearch.addEventListener('input', filterInvoiceProducts);
+    }
+
     window.addEventListener('click', (e) => {
         const addItemModal = document.getElementById('addItemModal');
         const editItemModal = document.getElementById('editItemModal');
